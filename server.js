@@ -217,7 +217,6 @@ function simpleChunking(content, chunkSize) {
   return chunks.length > 0 ? chunks : [content];
 }
 
-// Iniciar servidor
 app.listen(PORT, () => {
   console.log(`🎯 Chunking Microservice rodando na porta ${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
