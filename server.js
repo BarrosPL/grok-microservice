@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -9,12 +10,18 @@ app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
-// 🔐 API KEY DIRETA (APENAS PARA TESTES)
-const GROK_API_KEY = 'xai-1yLdNjM8eyzKn7T60Xl64MJeJU4FxSWDCNH9yQumLgFI6lnFKppV5uWihWdApQUdBKl8HwhKnqjJm131';
+// Configurações do .env
+const GROK_API_KEY = process.env.GROK_API_KEY;
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
 const PORT = process.env.PORT || 3001;
 
-// Log inicial
+// Validação da API Key
+if (!GROK_API_KEY) {
+  console.error('❌ ERRO: GROK_API_KEY não encontrada no .env');
+  process.exit(1);
+}
+
+// Log inicial (sem mostrar a key completa por segurança)
 console.log('🚀 Iniciando Chunking Microservice');
 console.log('📊 Configurações:', {
   port: PORT,
@@ -217,6 +224,7 @@ function simpleChunking(content, chunkSize) {
   return chunks.length > 0 ? chunks : [content];
 }
 
+// Iniciar servidor
 app.listen(PORT, () => {
   console.log(`🎯 Chunking Microservice rodando na porta ${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
