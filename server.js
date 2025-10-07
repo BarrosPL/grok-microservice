@@ -17,16 +17,16 @@ const PORT = process.env.PORT || 3001;
 
 // Validação da API Key
 if (!GROK_API_KEY) {
-  console.error('❌ ERRO: GROK_API_KEY não encontrada no .env');
+  console.error('❌ ERRO: GROK_API_KEY não encontrada nas variáveis de ambiente');
+  console.log('💡 Dica: Configure GROK_API_KEY no Render.com environment variables');
   process.exit(1);
 }
 
-// Log inicial (sem mostrar a key completa por segurança)
+// Log inicial (seguro)
 console.log('🚀 Iniciando Chunking Microservice');
 console.log('📊 Configurações:', {
   port: PORT,
-  grokApiConfigured: !!GROK_API_KEY,
-  grokKeyPreview: GROK_API_KEY ? `${GROK_API_KEY.substring(0, 10)}...` : 'Não configurada'
+  grokApiConfigured: !!GROK_API_KEY
 });
 
 // Health Check
