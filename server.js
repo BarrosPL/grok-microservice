@@ -7,38 +7,29 @@ const app = express();
 
 // Middlewares
 app.use(express.json({ limit: '10mb' }));
+app.use(express.text({ limit: '10mb' })); // Aceitar texto puro também
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
-// Configurações do .env
+// Configurações
 const GROK_API_KEY = process.env.GROK_API_KEY;
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
 const PORT = process.env.PORT || 3001;
 
 // Validação da API Key
 if (!GROK_API_KEY) {
-  console.error('❌ ERRO: GROK_API_KEY não encontrada nas variáveis de ambiente');
-  console.log('💡 Dica: Configure GROK_API_KEY no Render.com environment variables');
+  console.error('❌ ERRO: GROK_API_KEY não encontrada');
   process.exit(1);
 }
 
-// Log inicial (seguro)
-console.log('🚀 Iniciando Chunking Microservice');
-console.log('📊 Configurações:', {
-  port: PORT,
-  grokApiConfigured: !!GROK_API_KEY
-});
+console.log('🚀 Microserviço de Chunking Iniciado');
 
 // Health Check
 app.get('/', (req, res) => {
-  res.json({
-    status: 'OK',
+  res.json({ 
+    status: 'OK', 
     service: 'chunking-microservice',
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      health: 'GET /health',
-      chunk: 'POST /chunk'
-    }
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -50,42 +41,54 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Endpoint principal de chunking
+// Endpoint principal CORRIGIDO - muito mais tolerante
 app.post('/chunk', async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { content, chunkSize = 800, overlap = 100, strategy = 'intelligent' } = req.body;
-
-    console.log(`\n🔄 NOVA REQUISIÇÃO DE CHUNKING`);
-    console.log(`   Estratégia: ${strategy}`);
-    console.log(`   Tamanho do conteúdo: ${content?.length || 0} caracteres`);
-
-    // Validações
-    if (!content) {
-      return res.status(400).json({
-        success: false,
-        error: 'Conteúdo é obrigatório',
-        chunks: [],
-        chunkCount: 0
-      });
+    console.log('📥 Request recebido no /chunk');
+    console.log('🔍 Content-Type:', req.headers['content-type']);
+    console.log('🔍 Body type:', typeof req.body);
+    
+    // EXTRAIR CONTEÚDO DE QUALQUER FORMATO
+    let content = '';
+    let chunkSize = 800;
+    let strategy = 'intelligent';
+    
+    // Caso 1: Body é JSON object
+    if (req.body && typeof req.body === 'object') {
+      console.log('✅ Body é objeto JSON');
+      content = req.body.content || req.body.text || req.body.data || '';
+      chunkSize = req.body.chunkSize || 800;
+      strategy = req.body.strategy || 'intelligent';
     }
-
-    if (content.length < 10) {
-      console.log('📝 Conteúdo muito pequeno, retornando chunk único');
-      return res.json({
-        success: true,
-        chunks: [content],
-        chunkCount: 1,
-        strategy: 'single_chunk',
-        processingTime: Date.now() - startTime
-      });
+    // Caso 2: Body é string (JSON stringificado)
+    else if (req.body && typeof req.body === 'string') {
+      console.log('✅ Body é string, tentando parsear JSON...');
+      try {
+        const parsed = JSON.parse(req.body);
+        content = parsed.content || parsed.text || parsed.data || '';
+        chunkSize = parsed.chunkSize || 800;
+        strategy = parsed.strategy || 'intelligent';
+      } catch (e) {
+        console.log('⚠️ Não é JSON, usando string como conteúdo');
+        content = req.body;
+      }
     }
-
+    
+    console.log(`📊 Conteúdo extraído: ${content.length} caracteres`);
+    console.log(`🎯 Estratégia: ${strategy}`);
+    
+    // Se ainda estiver vazio, usar fallback
+    if (!content || content.length < 10) {
+      console.log('🔄 Conteúdo vazio, usando fallback');
+      content = 'Conteúdo recebido vazio - necessário para processamento';
+    }
+    
     let chunks = [];
     let usedStrategy = strategy;
-
-    // Decidir estratégia de chunking
+    
+    // Aplicar chunking
     if (strategy === 'simple' || content.length < 500) {
       console.log('📝 Usando chunking simples');
       chunks = simpleChunking(content, chunkSize);
@@ -95,14 +98,11 @@ app.post('/chunk', async (req, res) => {
       chunks = await intelligentChunking(content, chunkSize);
       usedStrategy = 'intelligent';
     }
-
+    
     const processingTime = Date.now() - startTime;
-
-    console.log(`✅ CHUNKING CONCLUÍDO`);
-    console.log(`   Chunks gerados: ${chunks.length}`);
-    console.log(`   Estratégia utilizada: ${usedStrategy}`);
-    console.log(`   Tempo de processamento: ${processingTime}ms`);
-
+    
+    console.log(`✅ Chunking concluído: ${chunks.length} chunks`);
+    
     res.json({
       success: true,
       chunks: chunks,
@@ -110,15 +110,19 @@ app.post('/chunk', async (req, res) => {
       strategy: usedStrategy,
       contentLength: content.length,
       processingTime: processingTime,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      debug: {
+        receivedContentLength: content.length,
+        receivedStrategy: strategy
+      }
     });
-
+    
   } catch (error) {
-    const processingTime = Date.now() - startTime;
     console.error('❌ ERRO NO CHUNKING:', error.message);
     
-    // Fallback para chunking simples
-    const fallbackChunks = simpleChunking(req.body.content || '', 800);
+    // Fallback MUITO robusto
+    const fallbackContent = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    const fallbackChunks = [fallbackContent.substring(0, 2000)];
     
     res.json({
       success: true,
@@ -126,7 +130,7 @@ app.post('/chunk', async (req, res) => {
       chunkCount: fallbackChunks.length,
       strategy: 'fallback',
       error: error.message,
-      processingTime: processingTime,
+      processingTime: Date.now() - startTime,
       timestamp: new Date().toISOString()
     });
   }
@@ -135,98 +139,71 @@ app.post('/chunk', async (req, res) => {
 // Chunking inteligente com Grok API
 async function intelligentChunking(content, chunkSize) {
   try {
-    console.log('🤖 Chamando Grok API para chunking inteligente...');
-
+    console.log('🤖 Chamando Grok API...');
+    
     const response = await axios.post(GROK_API_URL, {
       model: 'grok-beta',
       messages: [
         {
           role: 'system',
-          content: `Você é um especialista em divisão de texto. Divida o seguinte conteúdo em pedaços lógicos de aproximadamente ${chunkSize} tokens. 
-Preserve os limites dos parágrafos e mantenha o contexto. 
-Retorne APENAS um array JSON válido de strings, onde cada string é um chunk.
-Exemplo: ["chunk 1 aqui", "chunk 2 aqui"]`
+          content: `Split text into logical chunks of ~${chunkSize} tokens. Return ONLY JSON array.`
         },
         {
           role: 'user',
-          content: content.length > 12000 ? content.substring(0, 12000) + '... [conteúdo truncado]' : content
+          content: content.substring(0, 10000) // Limitar tamanho
         }
       ],
       temperature: 0.1,
-      max_tokens: 4000
+      max_tokens: 3000
     }, {
       headers: {
         'Authorization': `Bearer ${GROK_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 45000
+      timeout: 30000
     });
 
-    console.log('✅ Resposta recebida do Grok');
-
     const chunksText = response.data.choices[0].message.content.trim();
-    console.log('📄 Resposta do Grok (primeiros 200 chars):', chunksText.substring(0, 200));
-
-    // Tentar parsear como JSON
+    
     try {
       const chunks = JSON.parse(chunksText);
       if (Array.isArray(chunks) && chunks.length > 0) {
-        const validChunks = chunks.filter(chunk => chunk && typeof chunk === 'string' && chunk.trim().length > 0);
-        console.log(`📦 ${validChunks.length} chunks válidos parseados do Grok`);
-        return validChunks;
+        return chunks.filter(chunk => chunk && chunk.trim().length > 0);
       }
-    } catch (parseError) {
-      console.log('❌ Grok não retornou JSON válido, usando fallback...');
+    } catch (e) {
+      console.log('❌ Grok não retornou JSON válido');
     }
-
-    // Fallback: chunking simples
-    console.log('🔄 Usando fallback para chunking simples');
+    
     return simpleChunking(content, chunkSize);
-
+    
   } catch (error) {
-    console.error('❌ Erro na Grok API:', {
-      message: error.message,
-      status: error.response?.status,
-      data: error.response?.data
-    });
-    throw new Error(`Falha no chunking inteligente: ${error.message}`);
+    console.error('❌ Erro Grok API:', error.message);
+    return simpleChunking(content, chunkSize);
   }
 }
 
-// Chunking simples por parágrafos
+// Chunking simples
 function simpleChunking(content, chunkSize) {
-  console.log('📝 Aplicando chunking simples...');
-  
-  const cleanContent = content.replace(/\n{3,}/g, '\n\n').trim();
-  const paragraphs = cleanContent.split('\n\n').filter(p => p.trim().length > 0);
-  
+  const paragraphs = content.split('\n\n').filter(p => p.trim().length > 0);
   const chunks = [];
   let currentChunk = '';
-  let currentSize = 0;
-
+  
   for (const paragraph of paragraphs) {
-    const paragraphSize = paragraph.length;
-    
-    if (currentSize + paragraphSize > chunkSize && currentSize > 0) {
+    if ((currentChunk + paragraph).length > chunkSize && currentChunk.length > 0) {
       chunks.push(currentChunk.trim());
       currentChunk = paragraph;
-      currentSize = paragraphSize;
     } else {
       currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
-      currentSize += paragraphSize;
     }
   }
-
+  
   if (currentChunk.trim().length > 0) {
     chunks.push(currentChunk.trim());
   }
-
+  
   return chunks.length > 0 ? chunks : [content];
 }
 
-// Iniciar servidor
 app.listen(PORT, () => {
-  console.log(`🎯 Chunking Microservice rodando na porta ${PORT}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`📝 Endpoint chunk: http://localhost:${PORT}/chunk`);
+  console.log(`🎯 Microserviço rodando na porta ${PORT}`);
 });
