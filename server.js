@@ -7,7 +7,7 @@ const app = express();
 
 // Middlewares
 app.use(express.json({ limit: '10mb' }));
-app.use(express.text({ limit: '10mb' })); // Aceitar texto puro também
+app.use(express.text({ limit: '10mb' }));
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
@@ -41,19 +41,20 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Endpoint principal CORRIGIDO - muito mais tolerante
+// Endpoint principal ATUALIZADO - PRESERVA URL
 app.post('/chunk', async (req, res) => {
   const startTime = Date.now();
   
   try {
     console.log('📥 Request recebido no /chunk');
-    console.log('🔍 Content-Type:', req.headers['content-type']);
-    console.log('🔍 Body type:', typeof req.body);
     
-    // EXTRAIR CONTEÚDO DE QUALQUER FORMATO
+    // EXTRAIR CONTEÚDO E URL DE QUALQUER FORMATO
     let content = '';
     let chunkSize = 800;
     let strategy = 'intelligent';
+    let sourceUrl = '';
+    let originalUrl = '';
+    let mainUrl = '';
     
     // Caso 1: Body é JSON object
     if (req.body && typeof req.body === 'object') {
@@ -61,6 +62,11 @@ app.post('/chunk', async (req, res) => {
       content = req.body.content || req.body.text || req.body.data || '';
       chunkSize = req.body.chunkSize || 800;
       strategy = req.body.strategy || 'intelligent';
+      
+      // 🔥 EXTRAIR URLS PRINCIPAIS
+      sourceUrl = req.body.sourceUrl || '';
+      originalUrl = req.body.original_url || req.body.originalUrl || '';
+      mainUrl = req.body.main_url || req.body.mainUrl || '';
     }
     // Caso 2: Body é string (JSON stringificado)
     else if (req.body && typeof req.body === 'string') {
@@ -70,13 +76,21 @@ app.post('/chunk', async (req, res) => {
         content = parsed.content || parsed.text || parsed.data || '';
         chunkSize = parsed.chunkSize || 800;
         strategy = parsed.strategy || 'intelligent';
+        
+        // 🔥 EXTRAIR URLS PRINCIPAIS
+        sourceUrl = parsed.sourceUrl || '';
+        originalUrl = parsed.original_url || parsed.originalUrl || '';
+        mainUrl = parsed.main_url || parsed.mainUrl || '';
       } catch (e) {
         console.log('⚠️ Não é JSON, usando string como conteúdo');
         content = req.body;
       }
     }
     
-    console.log(`📊 Conteúdo extraído: ${content.length} caracteres`);
+    // 🔥 DEFINIR URL PRINCIPAL (usar a mais confiável)
+    const primaryUrl = mainUrl || originalUrl || sourceUrl || 'unknown';
+    console.log(`📊 Conteúdo: ${content.length} caracteres`);
+    console.log(`🌐 URL principal: ${primaryUrl}`);
     console.log(`🎯 Estratégia: ${strategy}`);
     
     // Se ainda estiver vazio, usar fallback
@@ -103,31 +117,54 @@ app.post('/chunk', async (req, res) => {
     
     console.log(`✅ Chunking concluído: ${chunks.length} chunks`);
     
+    // 🔥 RETORNAR COM URL PRINCIPAL PRESERVADA
     res.json({
       success: true,
       chunks: chunks,
       chunkCount: chunks.length,
+      sourceUrl: primaryUrl, // ← URL PRESERVADA
+      original_url: primaryUrl, // ← BACKUP
+      main_url: primaryUrl, // ← BACKUP
       strategy: usedStrategy,
       contentLength: content.length,
       processingTime: processingTime,
       timestamp: new Date().toISOString(),
       debug: {
         receivedContentLength: content.length,
-        receivedStrategy: strategy
+        receivedStrategy: strategy,
+        receivedUrl: primaryUrl
       }
     });
     
   } catch (error) {
     console.error('❌ ERRO NO CHUNKING:', error.message);
     
-    // Fallback MUITO robusto
-    const fallbackContent = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    // Fallback ROBUSTO com URL preservada
+    let primaryUrl = 'unknown';
+    let fallbackContent = '';
+    
+    if (typeof req.body === 'string') {
+      fallbackContent = req.body;
+      try {
+        const parsed = JSON.parse(req.body);
+        primaryUrl = parsed.sourceUrl || parsed.original_url || parsed.main_url || 'unknown';
+      } catch (e) {
+        // Não é JSON, manter URL como unknown
+      }
+    } else {
+      fallbackContent = JSON.stringify(req.body);
+      primaryUrl = req.body.sourceUrl || req.body.original_url || req.body.main_url || 'unknown';
+    }
+    
     const fallbackChunks = [fallbackContent.substring(0, 2000)];
     
     res.json({
       success: true,
       chunks: fallbackChunks,
       chunkCount: fallbackChunks.length,
+      sourceUrl: primaryUrl, // ← URL PRESERVADA MESMO NO ERRO
+      original_url: primaryUrl, // ← BACKUP
+      main_url: primaryUrl, // ← BACKUP
       strategy: 'fallback',
       error: error.message,
       processingTime: Date.now() - startTime,
@@ -150,7 +187,7 @@ async function intelligentChunking(content, chunkSize) {
         },
         {
           role: 'user',
-          content: content.substring(0, 10000) // Limitar tamanho
+          content: content.substring(0, 10000)
         }
       ],
       temperature: 0.1,
@@ -206,4 +243,5 @@ function simpleChunking(content, chunkSize) {
 
 app.listen(PORT, () => {
   console.log(`🎯 Microserviço rodando na porta ${PORT}`);
+  console.log(`🔗 Preserva URL principal em todas as respostas`);
 });
