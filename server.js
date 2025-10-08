@@ -41,7 +41,21 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Endpoint principal ATUALIZADO - PRESERVA URL
+// 🔥 FUNÇÃO PARA EXTRAIR URL PRINCIPAL
+function extractPrimaryUrl(url) {
+  if (!url || url === 'unknown') return 'unknown';
+  
+  // Se for books.toscrape.com, remover /index.html e paths
+  if (url.includes('books.toscrape.com')) {
+    // Extrair apenas o domínio principal
+    const urlObj = new URL(url);
+    return `${urlObj.protocol}//${urlObj.hostname}`;
+  }
+  
+  return url;
+}
+
+// Endpoint principal ATUALIZADO - CORRIGIR URL
 app.post('/chunk', async (req, res) => {
   const startTime = Date.now();
   
@@ -63,7 +77,7 @@ app.post('/chunk', async (req, res) => {
       chunkSize = req.body.chunkSize || 800;
       strategy = req.body.strategy || 'intelligent';
       
-      // 🔥 EXTRAIR URLS PRINCIPAIS
+      // EXTRAIR URLS PRINCIPAIS
       sourceUrl = req.body.sourceUrl || '';
       originalUrl = req.body.original_url || req.body.originalUrl || '';
       mainUrl = req.body.main_url || req.body.mainUrl || '';
@@ -77,7 +91,7 @@ app.post('/chunk', async (req, res) => {
         chunkSize = parsed.chunkSize || 800;
         strategy = parsed.strategy || 'intelligent';
         
-        // 🔥 EXTRAIR URLS PRINCIPAIS
+        // EXTRAIR URLS PRINCIPAIS
         sourceUrl = parsed.sourceUrl || '';
         originalUrl = parsed.original_url || parsed.originalUrl || '';
         mainUrl = parsed.main_url || parsed.mainUrl || '';
@@ -87,11 +101,30 @@ app.post('/chunk', async (req, res) => {
       }
     }
     
-    // 🔥 DEFINIR URL PRINCIPAL (usar a mais confiável)
-    const primaryUrl = mainUrl || originalUrl || sourceUrl || 'unknown';
+    // 🔥 CORRIGIR URL PRINCIPAL - EXTRAIR DOMÍNIO PRINCIPAL
+    let primaryUrl = mainUrl || originalUrl || sourceUrl || 'unknown';
+    
+    // Se a URL contém /index.html ou outros paths, extrair apenas o domínio
+    if (primaryUrl !== 'unknown') {
+      primaryUrl = extractPrimaryUrl(primaryUrl);
+    }
+    
+    // 🔥 SE AINDA FOR UNKNOWN, FORÇAR URL DO BOOKS.TOSCRAPE.COM
+    if (primaryUrl === 'unknown' && content.includes('books.toscrape.com')) {
+      primaryUrl = 'https://books.toscrape.com';
+      console.log('🔧 URL forçada para books.toscrape.com baseada no conteúdo');
+    }
+    
     console.log(`📊 Conteúdo: ${content.length} caracteres`);
-    console.log(`🌐 URL principal: ${primaryUrl}`);
+    console.log(`🌐 URL principal CORRIGIDA: ${primaryUrl}`);
     console.log(`🎯 Estratégia: ${strategy}`);
+    
+    // DEBUG: Mostrar URLs recebidas
+    console.log('🔍 URLs recebidas:', {
+      sourceUrl: sourceUrl,
+      originalUrl: originalUrl,
+      mainUrl: mainUrl
+    });
     
     // Se ainda estiver vazio, usar fallback
     if (!content || content.length < 10) {
@@ -117,12 +150,12 @@ app.post('/chunk', async (req, res) => {
     
     console.log(`✅ Chunking concluído: ${chunks.length} chunks`);
     
-    // 🔥 RETORNAR COM URL PRINCIPAL PRESERVADA
+    // RETORNAR COM URL PRINCIPAL CORRIGIDA
     res.json({
       success: true,
       chunks: chunks,
       chunkCount: chunks.length,
-      sourceUrl: primaryUrl, // ← URL PRESERVADA
+      sourceUrl: primaryUrl, // ← URL CORRIGIDA
       original_url: primaryUrl, // ← BACKUP
       main_url: primaryUrl, // ← BACKUP
       strategy: usedStrategy,
@@ -132,14 +165,19 @@ app.post('/chunk', async (req, res) => {
       debug: {
         receivedContentLength: content.length,
         receivedStrategy: strategy,
-        receivedUrl: primaryUrl
+        receivedUrls: {
+          sourceUrl: sourceUrl,
+          originalUrl: originalUrl,
+          mainUrl: mainUrl
+        },
+        correctedUrl: primaryUrl
       }
     });
     
   } catch (error) {
     console.error('❌ ERRO NO CHUNKING:', error.message);
     
-    // Fallback ROBUSTO com URL preservada
+    // Fallback com URL preservada
     let primaryUrl = 'unknown';
     let fallbackContent = '';
     
@@ -147,13 +185,18 @@ app.post('/chunk', async (req, res) => {
       fallbackContent = req.body;
       try {
         const parsed = JSON.parse(req.body);
-        primaryUrl = parsed.sourceUrl || parsed.original_url || parsed.main_url || 'unknown';
+        const receivedUrl = parsed.sourceUrl || parsed.original_url || parsed.main_url || 'unknown';
+        primaryUrl = extractPrimaryUrl(receivedUrl);
       } catch (e) {
-        // Não é JSON, manter URL como unknown
+        // Não é JSON, tentar detectar URL do conteúdo
+        if (fallbackContent.includes('books.toscrape.com')) {
+          primaryUrl = 'https://books.toscrape.com';
+        }
       }
     } else {
       fallbackContent = JSON.stringify(req.body);
-      primaryUrl = req.body.sourceUrl || req.body.original_url || req.body.main_url || 'unknown';
+      const receivedUrl = req.body.sourceUrl || req.body.original_url || req.body.main_url || 'unknown';
+      primaryUrl = extractPrimaryUrl(receivedUrl);
     }
     
     const fallbackChunks = [fallbackContent.substring(0, 2000)];
@@ -162,9 +205,9 @@ app.post('/chunk', async (req, res) => {
       success: true,
       chunks: fallbackChunks,
       chunkCount: fallbackChunks.length,
-      sourceUrl: primaryUrl, // ← URL PRESERVADA MESMO NO ERRO
-      original_url: primaryUrl, // ← BACKUP
-      main_url: primaryUrl, // ← BACKUP
+      sourceUrl: primaryUrl,
+      original_url: primaryUrl,
+      main_url: primaryUrl,
       strategy: 'fallback',
       error: error.message,
       processingTime: Date.now() - startTime,
@@ -243,5 +286,5 @@ function simpleChunking(content, chunkSize) {
 
 app.listen(PORT, () => {
   console.log(`🎯 Microserviço rodando na porta ${PORT}`);
-  console.log(`🔗 Preserva URL principal em todas as respostas`);
+  console.log(`🔗 Corrige URL principal automaticamente`);
 });
